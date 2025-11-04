@@ -439,6 +439,13 @@ def main() -> None:
         button[aria-label="View fullscreen"] {
             display: none !important;
         }
+        /* Encourage light color scheme and hide theme pickers */
+        :root { color-scheme: light !important; }
+        [data-testid="stBaseThemePicker"],
+        [data-testid="stThemeToggle"],
+        [data-testid="stThemeCreator"] {
+            display: none !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,

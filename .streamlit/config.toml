@@ -1,0 +1,11 @@
+[theme]
+base = "light"
+# Optional brand-ish colors for a clean light palette
+primaryColor = "#cc0000"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f5f5f5"
+textColor = "#0a0a0a"
+
+# Keep the top toolbar minimal
+[client]
+toolbarMode = "viewer"

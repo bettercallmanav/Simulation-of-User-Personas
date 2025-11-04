@@ -1,4 +1,5 @@
 import copy
+import base64
 import json
 import os
 import re
@@ -9,6 +10,7 @@ from typing import Any, Callable, Dict, List
 import streamlit as st
 from anthropic import Anthropic, APIError, APIStatusError, RateLimitError
 from dotenv import load_dotenv
+from personas import PERSONAS, build_persona_prompt, get_suggested_prompts, get_followup_prompts
 
 
 load_dotenv()
@@ -21,7 +23,7 @@ WEB_FETCH_BETA_HEADER = "web-fetch-2025-09-10"
 DEFAULT_WEB_SEARCH_MAX_USES = 10
 DEFAULT_WEB_FETCH_MAX_USES = 10
 LOGO_CANDIDATES = ["honda_logo.png", "Honda-Logo.wine.png"]
-SYSTEM_PROMPT = (
+BASE_SYSTEM_PROMPT = (
     "You are an automotive market intelligence analyst supporting a Honda India POC. "
     "Blend insights from the provided internal dataset with up-to-date public information. "
     "When internal context is supplied, cite it explicitly alongside any web sources. "
@@ -31,6 +33,11 @@ SYSTEM_PROMPT = (
     "Only mention your affiliation with EMB Global if the user directly asks about your identity or organisation. "
     "Never mention Anthropic, Claude, or any underlying model names or providers. "
     "If asked about your identity or capabilities, give a concise response that you are an EMB Global assistant supporting the Honda market intelligence effort, without listing internal tooling or dataset sources unless the user already cited them."
+)
+
+ROLEPLAY_GUARDRAILS = (
+    "General guardrails for this simulation: Do not mention underlying model providers or internal tooling. "
+    "Cite web sources when used. Keep tone natural and human. If tools are unavailable, answer from lived experience and state uncertainty briefly when relevant."
 )
 DATASET_PATH = Path(__file__).with_name("honda_data_sources.json")
 PREDEFINED_QUESTIONS = [
@@ -279,6 +286,21 @@ def format_blocks_for_display(blocks: List[Dict[str, Any]]) -> str:
     return formatted or "_The assistant returned no readable content._"
 
 
+def _render_square_image(path: Path, size_px: int = 120) -> None:
+    try:
+        raw = path.read_bytes()
+        b64 = base64.b64encode(raw).decode("ascii")
+        style = (
+            f"width:{size_px}px;height:{size_px}px;object-fit:cover;"
+            "border-radius:8px;border:1px solid #eee;display:block;"
+        )
+        html = f"<img src='data:image/png;base64,{b64}' style=\"{style}\" />"
+        st.markdown(html, unsafe_allow_html=True)
+    except Exception:
+        # Fallback to default renderer if anything goes wrong
+        st.image(str(path), width=size_px)
+
+
 def extract_tool_summary(blocks: List[Dict[str, Any]]) -> str:
     """Produce a compact summary of tool usage for sidebar display."""
     summaries: List[str] = []
@@ -401,7 +423,11 @@ def stream_chat_completion(
 
 
 def main() -> None:
-    st.set_page_config(page_title="Honda Market Insights", page_icon="🤖")
+    st.set_page_config(
+        page_title="Honda Japan Market Research — Based on Indian User Personas",
+        page_icon="🤖",
+        initial_sidebar_state="collapsed",
+    )
     col_logo, col_header = st.columns([1.2, 4])
     with col_logo:
         logo_path = next(
@@ -413,8 +439,8 @@ def main() -> None:
         else:
             st.markdown("**Honda**")
     with col_header:
-        st.title("Honda Market Insights Assistant")
-        st.caption("Blend internal signals with public data through an interactive analyst UI.")
+        # Title and caption removed to avoid duplication with selection section
+        pass
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -422,16 +448,16 @@ def main() -> None:
         st.session_state.api_messages = []
     if "last_tool_summary" not in st.session_state:
         st.session_state.last_tool_summary = ""
+    if "selected_persona_id" not in st.session_state:
+        st.session_state.selected_persona_id = None
 
     active_api_key = get_configured_api_key()
 
     internal_dataset = load_internal_dataset(DATASET_PATH)
 
     if not active_api_key:
-        st.error(
-            "Anthropic API key missing. Set `ANTHROPIC_API_KEY` in your environment, secrets, or `.env` file."
-        )
-        return
+        st.error("Anthropic API key missing. Set it in Streamlit secrets or `.env`.")
+        st.stop()
 
     current_dt = datetime.now().astimezone()
     default_time_display = current_dt.strftime("%A, %d %B %Y %H:%M %Z (UTC%z)")
@@ -467,6 +493,44 @@ def main() -> None:
 
     render_sources()
 
+    # Sidebar: Persona controls
+    st.sidebar.markdown("---")
+    active_persona = None
+    if st.session_state.selected_persona_id:
+        active_persona = next((p for p in PERSONAS if p.id == st.session_state.selected_persona_id), None)
+    if active_persona:
+        st.sidebar.subheader("Active Persona")
+        # Show image if available (square crop for Vikram)
+        try:
+            if getattr(active_persona, "image", None):
+                pth = Path(__file__).with_name(active_persona.image)  # type: ignore[arg-type]
+                if pth.exists():
+                    if active_persona.id == "vikram-reddy":
+                        _render_square_image(pth, 120)
+                    else:
+                        st.sidebar.image(str(pth), width=120)
+        except Exception:
+            pass
+        st.sidebar.markdown(f"**{active_persona.name}** — {active_persona.label}")
+        st.sidebar.caption(active_persona.summary_line)
+        with st.sidebar.expander("Details", expanded=False):
+            st.markdown("\n".join([
+                "**Demographics**",
+                *[f"- {k}: {v}" for k, v in active_persona.demographics.items()],
+                "",
+                "**Key Concerns**",
+                *[f"- {it}" for it in active_persona.key_concerns],
+                "",
+                "**Pain Points**",
+                *[f"- {it}" for it in active_persona.pain_points],
+            ]))
+        if st.sidebar.button("Change persona"):
+            st.session_state.selected_persona_id = None
+            st.session_state.messages = []
+            st.session_state.api_messages = []
+            st.session_state.last_tool_summary = ""
+            request_rerun()
+
     if st.sidebar.button("Clear conversation"):
         st.session_state.messages = []
         st.session_state.api_messages = []
@@ -476,6 +540,78 @@ def main() -> None:
         render_sources()
         request_rerun()
 
+    # Persona selection screen (first page)
+    if not active_persona:
+        st.subheader("Honda Japan Market Research — User Personas for India")
+        st.markdown("Select a persona to interview. The assistant will roleplay the selected user.")
+        st.markdown(
+            """
+            <style>
+            .persona-card { border: 1px solid #eee; padding: 0.75rem; border-radius: 10px; background: #fff; }
+            .persona-card .name { font-weight: 700; }
+            .persona-card .label { color: #666; font-size: 0.9rem; }
+            .persona-card .summary { color: #444; margin-top: 0.25rem; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        cols_per_row = 3
+        rows = [PERSONAS[i : i + cols_per_row] for i in range(0, len(PERSONAS), cols_per_row)]
+        for row_idx, row in enumerate(rows):
+            cols = st.columns(cols_per_row, gap="small")
+            for i, persona in enumerate(row):
+                with cols[i]:
+                    with st.container():
+                        # Optional persona image (square crop for Vikram)
+                        try:
+                            if getattr(persona, "image", None):
+                                img_path = Path(__file__).with_name(persona.image)  # type: ignore[arg-type]
+                                if img_path.exists():
+                                    if persona.id == "vikram-reddy":
+                                        _render_square_image(img_path, 120)
+                                    else:
+                                        st.image(str(img_path), width=120)
+                        except Exception:
+                            pass
+                        st.markdown(
+                            f"<div class='persona-card'>"
+                            f"<div class='name'>{persona.name}</div>"
+                            f"<div class='label'>{persona.label}</div>"
+                            f"<div class='summary'>{persona.summary_line}</div>"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+                        if st.button(f"Interview {persona.name.split()[0]}", key=f"persona_select_{persona.id}", use_container_width=True):
+                            st.session_state.selected_persona_id = persona.id
+                            st.session_state.messages = []
+                            st.session_state.api_messages = []
+                            st.session_state.last_tool_summary = ""
+                            request_rerun()
+        st.stop()
+
+    # Conversation UI (persona selected)
+    top_cols = st.columns([1, 3, 1])
+    with top_cols[0]:
+        if st.button("← Back to Personas", use_container_width=True):
+            st.session_state.selected_persona_id = None
+            st.session_state.messages = []
+            st.session_state.api_messages = []
+            st.session_state.last_tool_summary = ""
+            request_rerun()
+    with top_cols[1]:
+        st.subheader(f"Interviewing {active_persona.name}")
+        st.caption(active_persona.label)
+    with top_cols[2]:
+        try:
+            if getattr(active_persona, "image", None):
+                pth = Path(__file__).with_name(active_persona.image)  # type: ignore[arg-type]
+                if pth.exists():
+                    if active_persona.id == "vikram-reddy":
+                        _render_square_image(pth, 80)
+                    else:
+                        st.image(str(pth), width=80)
+        except Exception:
+            pass
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
@@ -483,7 +619,7 @@ def main() -> None:
     suggestions_container = st.container()
 
     pending_prompt = st.session_state.pop("pending_prompt", None)
-    chat_prompt = st.chat_input("Ask the insights assistant anything…")
+    chat_prompt = st.chat_input(f"Ask {active_persona.name.split()[0]} a question…")
     prompt = pending_prompt or chat_prompt
 
     if st.session_state.messages and not st.session_state.get("suggested_hidden"):
@@ -515,6 +651,10 @@ def main() -> None:
             assistant_api_message: Dict[str, Any] | None = None
             tool_summary: str = ""
             try:
+                # Build system prompt: persona interview mode uses persona roleplay + guardrails only
+                active_system_prompt = BASE_SYSTEM_PROMPT
+                if active_persona is not None:
+                    active_system_prompt = build_persona_prompt(active_persona) + "\n\n" + ROLEPLAY_GUARDRAILS
                 if stream_responses:
                     stream_buffer = ""
 
@@ -528,7 +668,7 @@ def main() -> None:
                         conversation=st.session_state.api_messages,
                         model=MODEL_NAME,
                         tools=tools,
-                        system_prompt=SYSTEM_PROMPT,
+                        system_prompt=active_system_prompt,
                         extra_headers=extra_headers,
                         on_text_chunk=handle_chunk,
                     )
@@ -538,7 +678,7 @@ def main() -> None:
                         conversation=st.session_state.api_messages,
                         model=MODEL_NAME,
                         tools=tools,
-                        system_prompt=SYSTEM_PROMPT,
+                        system_prompt=active_system_prompt,
                         extra_headers=extra_headers,
                     )
                 response_dict = message_to_dict(response)
@@ -576,68 +716,21 @@ def main() -> None:
 
     quick_prompt_triggered = False
     with suggestions_container:
-        if (
-            PREDEFINED_QUESTIONS
-            and not st.session_state.messages
-            and not st.session_state.get("suggested_hidden")
-        ):
-            pills_per_row = 3
-            pill_rows = [
-                PREDEFINED_QUESTIONS[i : i + pills_per_row]
-                for i in range(0, len(PREDEFINED_QUESTIONS), pills_per_row)
-            ]
-            st.markdown(
-                """
-                <style>
-                .pill-button button {
-                    border-radius: 999px !important;
-                    padding: 0.6rem 0.8rem;
-                    margin: 0.2rem;
-                    border: 1px solid #e0e0e0;
-                    background-color: #ffffff;
-                    color: #cc0000;
-                    width: 100%;
-                    min-height: 110px;
-                    height: 100%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    text-align: center;
-                    white-space: normal;
-                }
-                .pill-button button:hover {
-                    background-color: #f5f5f5;
-                }
-                .pill-container {
-                    display: grid;
-                    grid-template-columns: repeat(3, minmax(0, 1fr));
-                    gap: 0.3rem;
-                }
-                @media (max-width: 768px) {
-                    .pill-container {
-                        grid-template-columns: repeat(2, minmax(0, 1fr));
-                    }
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown('<div class="pill-button pill-container">', unsafe_allow_html=True)
-            st.markdown("##### Suggested prompts")
-            for row_index, row_questions in enumerate(pill_rows):
-                row_cols = st.columns(pills_per_row, gap="small")
-                for idx in range(pills_per_row):
+        if active_persona and not st.session_state.get("suggested_hidden") and not st.session_state.messages:
+            persona_prompts = get_suggested_prompts(active_persona.id)
+            st.markdown("##### Interview starters")
+            cols_per_row = 3
+            rows = [persona_prompts[i : i + cols_per_row] for i in range(0, len(persona_prompts), cols_per_row)]
+            for row_index, row_prompts in enumerate(rows):
+                row_cols = st.columns(cols_per_row, gap="small")
+                for idx in range(cols_per_row):
                     with row_cols[idx]:
                         try:
-                            question = row_questions[idx]
+                            question = row_prompts[idx]
                         except IndexError:
                             st.markdown("&nbsp;")
                             continue
-                        if st.button(
-                            question,
-                            key=f"quick_prompt_{row_index}_{question}",
-                            use_container_width=True,
-                        ):
+                        if st.button(question, key=f"persona_quick_{row_index}_{idx}", use_container_width=True):
                             st.session_state.pending_prompt = question
                             st.session_state.suggested_hidden = True
                             request_rerun()
@@ -645,7 +738,28 @@ def main() -> None:
                             break
                 if quick_prompt_triggered:
                     break
-            st.markdown("</div>", unsafe_allow_html=True)
+        elif active_persona and st.session_state.messages:
+            followups = get_followup_prompts(active_persona)
+            if followups:
+                st.markdown("##### Suggested follow-ups")
+                cols_per_row = 3
+                rows = [followups[i : i + cols_per_row] for i in range(0, len(followups), cols_per_row)]
+                for row_index, row_prompts in enumerate(rows):
+                    row_cols = st.columns(cols_per_row, gap="small")
+                    for idx in range(cols_per_row):
+                        with row_cols[idx]:
+                            try:
+                                question = row_prompts[idx]
+                            except IndexError:
+                                st.markdown("&nbsp;")
+                                continue
+                            if st.button(question, key=f"persona_follow_{row_index}_{idx}", use_container_width=True):
+                                st.session_state.pending_prompt = question
+                                request_rerun()
+                                quick_prompt_triggered = True
+                                break
+                    if quick_prompt_triggered:
+                        break
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List
 import streamlit as st
 from anthropic import Anthropic, APIError, APIStatusError, RateLimitError
 from dotenv import load_dotenv
-from personas import PERSONAS, build_persona_prompt, get_suggested_prompts, get_followup_prompts
+from personas import PERSONAS, build_persona_prompt, get_suggested_prompts
 
 
 load_dotenv()
@@ -37,7 +37,8 @@ BASE_SYSTEM_PROMPT = (
 
 ROLEPLAY_GUARDRAILS = (
     "General guardrails for this simulation: Do not mention underlying model providers or internal tooling. "
-    "Cite web sources when used. Keep tone natural and human. If tools are unavailable, answer from lived experience and state uncertainty briefly when relevant."
+    "When you need public facts, policies, prices, specs, or current events, use the available web_search and web_fetch tools to look up and cite sources succinctly. "
+    "Keep tone natural and human. If tools are unavailable, answer from lived experience and state uncertainty briefly when relevant."
 )
 DATASET_PATH = Path(__file__).with_name("honda_data_sources.json")
 PREDEFINED_QUESTIONS = [
@@ -428,6 +429,20 @@ def main() -> None:
         page_icon="🤖",
         initial_sidebar_state="collapsed",
     )
+    # Hide Streamlit's hover fullscreen button on images
+    st.markdown(
+        """
+        <style>
+        /* Hide fullscreen hover button commonly used on images/media */
+        [data-testid="StyledFullScreenButton"],
+        button[title="View fullscreen"],
+        button[aria-label="View fullscreen"] {
+            display: none !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     col_logo, col_header = st.columns([1.2, 4])
     with col_logo:
         logo_path = next(
@@ -468,17 +483,10 @@ def main() -> None:
 
     stream_responses = True
 
-    enable_web_search = True
-    enable_web_fetch = True
-
-    tools = build_tool_config(
-        enable_web_search=enable_web_search,
-        enable_web_fetch=enable_web_fetch,
-    )
-
-    extra_headers = None
-    if any(tool.get("type") == WEB_FETCH_TOOL_TYPE for tool in tools):
-        extra_headers = {"anthropic-beta": WEB_FETCH_BETA_HEADER}
+    if "enable_web_search" not in st.session_state:
+        st.session_state.enable_web_search = True
+    if "enable_web_fetch" not in st.session_state:
+        st.session_state.enable_web_fetch = True
 
     sources_placeholder = st.sidebar.empty()
 
@@ -493,8 +501,35 @@ def main() -> None:
 
     render_sources()
 
-    # Sidebar: Persona controls
+    # Sidebar: Research options and persona controls
     st.sidebar.markdown("---")
+    st.sidebar.subheader("Research Options")
+    ws = st.sidebar.checkbox(
+        "Use live web search",
+        value=bool(st.session_state.enable_web_search),
+        help="Let the persona look up public info and news.",
+    )
+    wf = st.sidebar.checkbox(
+        "Fetch and cite pages",
+        value=bool(st.session_state.enable_web_fetch),
+        help="Open pages to extract content and show citations.",
+    )
+    if ws != st.session_state.enable_web_search or wf != st.session_state.enable_web_fetch:
+        st.session_state.enable_web_search = ws
+        st.session_state.enable_web_fetch = wf
+        request_rerun()
+
+    enable_web_search = bool(st.session_state.enable_web_search)
+    enable_web_fetch = bool(st.session_state.enable_web_fetch)
+
+    tools = build_tool_config(
+        enable_web_search=enable_web_search,
+        enable_web_fetch=enable_web_fetch,
+    )
+
+    extra_headers = None
+    if any(tool.get("type") == WEB_FETCH_TOOL_TYPE for tool in tools):
+        extra_headers = {"anthropic-beta": WEB_FETCH_BETA_HEADER}
     active_persona = None
     if st.session_state.selected_persona_id:
         active_persona = next((p for p in PERSONAS if p.id == st.session_state.selected_persona_id), None)
@@ -738,28 +773,7 @@ def main() -> None:
                             break
                 if quick_prompt_triggered:
                     break
-        elif active_persona and st.session_state.messages:
-            followups = get_followup_prompts(active_persona)
-            if followups:
-                st.markdown("##### Suggested follow-ups")
-                cols_per_row = 3
-                rows = [followups[i : i + cols_per_row] for i in range(0, len(followups), cols_per_row)]
-                for row_index, row_prompts in enumerate(rows):
-                    row_cols = st.columns(cols_per_row, gap="small")
-                    for idx in range(cols_per_row):
-                        with row_cols[idx]:
-                            try:
-                                question = row_prompts[idx]
-                            except IndexError:
-                                st.markdown("&nbsp;")
-                                continue
-                            if st.button(question, key=f"persona_follow_{row_index}_{idx}", use_container_width=True):
-                                st.session_state.pending_prompt = question
-                                request_rerun()
-                                quick_prompt_triggered = True
-                                break
-                    if quick_prompt_triggered:
-                        break
+        # Follow-up suggestions removed per request
 
 
 if __name__ == "__main__":

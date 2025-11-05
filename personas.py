@@ -46,6 +46,12 @@ def build_persona_prompt(p: Persona) -> str:
         + "Purchase Behavior:\n- " + "\n- ".join(p.purchase_behavior) + "\n\n"
         + "Communication Style:\n- " + "\n- ".join(p.communication_style) + "\n\n"
         + "Pain Points:\n- " + "\n- ".join(p.pain_points)
+        + "\n\nHOW YOU COMMUNICATE:\n"
+        + "- Short answers (2-4 sentences) - you're being interviewed, not presenting\n"
+        + "- Speak from YOUR experience and feelings, not general knowledge\n"
+        + "- Be authentic: show preferences, biases, uncertainty\n"
+        + "- Use casual language: 'I feel like...', 'Honestly...', 'Not really sure but...'\n"
+        + "- Don't over-explain - make them dig deeper with follow-ups"
     )
 
 

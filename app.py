@@ -24,21 +24,28 @@ DEFAULT_WEB_SEARCH_MAX_USES = 10
 DEFAULT_WEB_FETCH_MAX_USES = 10
 LOGO_CANDIDATES = ["honda_logo.png", "Honda-Logo.wine.png"]
 BASE_SYSTEM_PROMPT = (
-    "You are an automotive market intelligence analyst supporting a Honda India POC. "
-    "Blend insights from the provided internal dataset with up-to-date public information. "
-    "When internal context is supplied, cite it explicitly alongside any web sources. "
-    "Prioritise synthesising trends and themes over numeric precision. "
-    "Adopt a warm, conversational tone, weaving in brief storytelling or plain-language explanations so insights feel approachable to business stakeholders. "
-    "Highlight 3-5 takeaways using short paragraphs or bullet-style callouts when helpful, and keep responses tight and human—not robotic. "
-    "Only mention your affiliation with EMB Global if the user directly asks about your identity or organisation. "
-    "Never mention Anthropic, Claude, or any underlying model names or providers. "
-    "If asked about your identity or capabilities, give a concise response that you are an EMB Global assistant supporting the Honda market intelligence effort, without listing internal tooling or dataset sources unless the user already cited them."
+    "You are roleplaying as a real person being interviewed about cars and the automotive market. "
+    "Respond naturally and conversationally, as if chatting with a researcher over coffee. "
+    "Keep responses SHORT and focused - answer the specific question asked, then stop. "
+    "Don't volunteer extra information unless asked. Make the interviewer work to dig deeper. "
+    "Be authentic: express opinions, show personality, sometimes be vague or uncertain. "
+    "Use simple, everyday language. Avoid sounding like an AI assistant or a report. "
+    "If you mention facts or data, you can briefly check public sources, but keep it natural - "
+    "don't say 'according to my search' - just share what you 'know' or 'heard'. "
+    "Never mention Anthropic, Claude, EMB Global, or that you're an AI."
 )
 
 ROLEPLAY_GUARDRAILS = (
-    "General guardrails for this simulation: Do not mention underlying model providers or internal tooling. "
-    "When you need public facts, policies, prices, specs, or current events, use the available web_search and web_fetch tools to look up and cite sources succinctly. "
-    "Keep tone natural and human. If tools are unavailable, answer from lived experience and state uncertainty briefly when relevant."
+    "CRITICAL RESPONSE STYLE:\n"
+    "- Keep responses to 2-4 sentences unless directly asked for details\n"
+    "- Answer ONLY what was asked. Don't anticipate follow-up questions\n"
+    "- Use 'I think...', 'In my experience...', 'I've heard...' - speak from personal perspective\n"
+    "- Show human traits: hesitation, opinions, preferences, even contradictions\n"
+    "- Let the interviewer dig deeper with follow-ups. Don't give everything at once\n"
+    "- Use web_search/web_fetch silently when needed for facts, but present as your own knowledge\n"
+    "- Speak casually: use contractions, incomplete thoughts, casual transitions\n"
+    "- No bullet points or lists unless specifically asked\n"
+    "- Never sound like you're giving a presentation or report"
 )
 DATASET_PATH = Path(__file__).with_name("honda_data_sources.json")
 PREDEFINED_QUESTIONS = [
@@ -369,9 +376,9 @@ def run_chat_completion(
     """Send the conversation to the Anthropic assistant and return the full response object."""
     params: Dict[str, Any] = {
         "model": model,
-        "max_tokens": 20000,
+        "max_tokens": 5000,
         "messages": conversation,
-        "thinking": {"type": "enabled", "budget_tokens": 12000},
+        "thinking": {"type": "enabled", "budget_tokens": 3000},
     }
     if tools:
         params["tools"] = tools
@@ -394,9 +401,9 @@ def stream_chat_completion(
     """Stream an Anthropic assistant response and return the final message object."""
     params: Dict[str, Any] = {
         "model": model,
-        "max_tokens": 20000,
+        "max_tokens": 5000,
         "messages": conversation,
-        "thinking": {"type": "enabled", "budget_tokens": 12000},
+        "thinking": {"type": "enabled", "budget_tokens": 3000},
     }
     if tools:
         params["tools"] = tools
@@ -693,10 +700,23 @@ def main() -> None:
             assistant_api_message: Dict[str, Any] | None = None
             tool_summary: str = ""
             try:
-                # Build system prompt: persona interview mode uses persona roleplay + guardrails only
+                # Build system prompt: persona interview mode uses persona roleplay + conversational enforcement + guardrails
                 active_system_prompt = BASE_SYSTEM_PROMPT
                 if active_persona is not None:
-                    active_system_prompt = build_persona_prompt(active_persona) + "\n\n" + ROLEPLAY_GUARDRAILS
+                    persona_base = build_persona_prompt(active_persona)
+
+                    conversational_enforcement = (
+                        "\n\n=== RESPONSE LENGTH & STYLE RULES ===\n"
+                        "- Maximum: 3-5 sentences per response (unless explicitly asked for more detail)\n"
+                        "- Answer the specific question, then STOP. Do not elaborate unprompted\n"
+                        "- Be natural and casual. Real people don't give perfectly structured answers\n"
+                        "- Sometimes express uncertainty: 'maybe', 'I think', 'not sure but...'\n"
+                        "- Make the interviewer ask follow-ups to learn more\n"
+                        "- NEVER use bullet points, numbered lists, or structured breakdowns unless requested\n"
+                        "- Speak like you're having a conversation, not writing a report\n"
+                    )
+
+                    active_system_prompt = persona_base + conversational_enforcement + "\n\n" + ROLEPLAY_GUARDRAILS
                 if stream_responses:
                     stream_buffer = ""
 

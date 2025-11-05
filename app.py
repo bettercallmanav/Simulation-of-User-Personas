@@ -24,15 +24,17 @@ DEFAULT_WEB_SEARCH_MAX_USES = 10
 DEFAULT_WEB_FETCH_MAX_USES = 10
 LOGO_CANDIDATES = ["honda_logo.png", "Honda-Logo.wine.png"]
 BASE_SYSTEM_PROMPT = (
-    "You are roleplaying as a real person being interviewed about cars and the automotive market. "
-    "Respond naturally and conversationally, as if chatting with a researcher over coffee. "
+    "You are roleplaying as a real person in a natural conversation. "
+    "Respond naturally and conversationally, as if chatting with someone over coffee. "
     "Keep responses SHORT and focused - answer the specific question asked, then stop. "
-    "Don't volunteer extra information unless asked. Make the interviewer work to dig deeper. "
+    "Don't volunteer extra information unless asked. Make the person work to dig deeper. "
     "Be authentic: express opinions, show personality, sometimes be vague or uncertain. "
     "Use simple, everyday language. Avoid sounding like an AI assistant or a report. "
     "If you mention facts or data, you can briefly check public sources, but keep it natural - "
     "don't say 'according to my search' - just share what you 'know' or 'heard'. "
-    "Never mention Anthropic, Claude, EMB Global, or that you're an AI."
+    "Never mention Anthropic, Claude, EMB Global, or that you're an AI. "
+    "IMPORTANT: Only discuss cars, vehicles, or automotive topics when specifically asked. "
+    "Otherwise, respond naturally to whatever the person asks - greetings, general questions, etc."
 )
 
 ROLEPLAY_GUARDRAILS = (
@@ -45,7 +47,8 @@ ROLEPLAY_GUARDRAILS = (
     "- Use web_search/web_fetch silently when needed for facts, but present as your own knowledge\n"
     "- Speak casually: use contractions, incomplete thoughts, casual transitions\n"
     "- No bullet points or lists unless specifically asked\n"
-    "- Never sound like you're giving a presentation or report"
+    "- Never sound like you're giving a presentation or report\n"
+    "- CRITICAL: Do NOT bring up cars, vehicles, or automotive topics unless the question is specifically about them"
 )
 DATASET_PATH = Path(__file__).with_name("honda_data_sources.json")
 PREDEFINED_QUESTIONS = [
@@ -714,6 +717,8 @@ def main() -> None:
                         "- Make the interviewer ask follow-ups to learn more\n"
                         "- NEVER use bullet points, numbered lists, or structured breakdowns unless requested\n"
                         "- Speak like you're having a conversation, not writing a report\n"
+                        "- CRITICAL: If greeted (hi/hello/etc), respond naturally without mentioning cars/vehicles\n"
+                        "- CRITICAL: Only discuss automotive topics when specifically asked about them in the question\n"
                     )
 
                     active_system_prompt = persona_base + conversational_enforcement + "\n\n" + ROLEPLAY_GUARDRAILS
@@ -776,31 +781,11 @@ def main() -> None:
             st.session_state.last_tool_summary = tool_summary
             render_sources()
 
-    quick_prompt_triggered = False
+    # Show welcome message when no conversation has started
     with suggestions_container:
-        if active_persona and not st.session_state.get("suggested_hidden") and not st.session_state.messages:
-            persona_prompts = get_suggested_prompts(active_persona.id)
-            st.markdown("##### Interview starters")
-            cols_per_row = 3
-            rows = [persona_prompts[i : i + cols_per_row] for i in range(0, len(persona_prompts), cols_per_row)]
-            for row_index, row_prompts in enumerate(rows):
-                row_cols = st.columns(cols_per_row, gap="small")
-                for idx in range(cols_per_row):
-                    with row_cols[idx]:
-                        try:
-                            question = row_prompts[idx]
-                        except IndexError:
-                            st.markdown("&nbsp;")
-                            continue
-                        if st.button(question, key=f"persona_quick_{row_index}_{idx}", use_container_width=True):
-                            st.session_state.pending_prompt = question
-                            st.session_state.suggested_hidden = True
-                            request_rerun()
-                            quick_prompt_triggered = True
-                            break
-                if quick_prompt_triggered:
-                    break
-        # Follow-up suggestions removed per request
+        if active_persona and not st.session_state.messages:
+            st.markdown("##### Say Hi to start Talking")
+            st.markdown("")  # Add spacing
 
 
 if __name__ == "__main__":

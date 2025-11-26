@@ -460,19 +460,19 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
-    col_logo, col_header = st.columns([1.2, 4])
-    with col_logo:
-        logo_path = next(
-            (Path(__file__).with_name(name) for name in LOGO_CANDIDATES if Path(__file__).with_name(name).exists()),
-            None,
-        )
-        if logo_path:
-            st.image(str(logo_path), width=200)
-        else:
-            st.markdown("**Honda**")
-    with col_header:
-        # Title and caption removed to avoid duplication with selection section
-        pass
+    # col_logo, col_header = st.columns([1.2, 4])
+    # with col_logo:
+    #     logo_path = next(
+    #         (Path(__file__).with_name(name) for name in LOGO_CANDIDATES if Path(__file__).with_name(name).exists()),
+    #         None,
+    #     )
+    #     if logo_path:
+    #         st.image(str(logo_path), width=200)
+    #     else:
+    #         st.markdown("**Honda**")
+    # with col_header:
+    #     # Title and caption removed to avoid duplication with selection section
+    #     pass
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -594,7 +594,7 @@ def main() -> None:
 
     # Persona selection screen (first page)
     if not active_persona:
-        st.subheader("Honda Japan Market Research — User Personas for India")
+        st.subheader("Market Research — User Personas for India")
         st.markdown("Select a persona to interview. The assistant will roleplay the selected user.")
         st.markdown(
             """

@@ -435,7 +435,7 @@ def stream_chat_completion(
 
 def main() -> None:
     st.set_page_config(
-        page_title="Honda Japan Market Research — Based on Indian User Personas",
+        page_title="Market Research - Based on Indian User Personas",
         page_icon="🤖",
         initial_sidebar_state="collapsed",
     )

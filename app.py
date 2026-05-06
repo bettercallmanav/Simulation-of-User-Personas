@@ -368,6 +368,51 @@ def extract_tool_summary(blocks: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def sanitize_assistant_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Strip output-only fields from assistant blocks so they can be re-sent as input.
+
+    The Anthropic SDK's ``model_dump()`` includes fields like ``parsed_output`` that
+    are populated on read but rejected as input ("Extra inputs are not permitted").
+    Whitelist the valid input fields per block type.
+    """
+    cleaned: List[Dict[str, Any]] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type == "text":
+            new_block: Dict[str, Any] = {"type": "text", "text": block.get("text", "")}
+            citations = block.get("citations")
+            if citations:
+                new_block["citations"] = citations
+            cleaned.append(new_block)
+        elif block_type == "thinking":
+            new_block = {"type": "thinking", "thinking": block.get("thinking", "")}
+            if block.get("signature"):
+                new_block["signature"] = block["signature"]
+            cleaned.append(new_block)
+        elif block_type == "redacted_thinking":
+            cleaned.append({"type": "redacted_thinking", "data": block.get("data", "")})
+        elif block_type in {"tool_use", "server_tool_use"}:
+            new_block = {
+                "type": block_type,
+                "id": block.get("id"),
+                "name": block.get("name"),
+                "input": block.get("input", {}),
+            }
+            cleaned.append(new_block)
+        elif block_type in {"web_search_tool_result", "web_fetch_tool_result"}:
+            new_block = {
+                "type": block_type,
+                "tool_use_id": block.get("tool_use_id"),
+                "content": block.get("content"),
+            }
+            cleaned.append(new_block)
+        else:
+            cleaned.append(block)
+    return cleaned
+
+
 def run_chat_completion(
     client: Anthropic,
     conversation: List[Dict[str, Any]],
@@ -754,7 +799,7 @@ def main() -> None:
                 tool_summary = extract_tool_summary(response_blocks)
                 assistant_api_message = {
                     "role": "assistant",
-                    "content": copy.deepcopy(response_blocks)
+                    "content": sanitize_assistant_blocks(copy.deepcopy(response_blocks))
                     if response_blocks
                     else [{"type": "text", "text": reply}],
                 }
